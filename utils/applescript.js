@@ -3,43 +3,82 @@
  * Executes AppleScript and JXA scripts via osascript
  */
 
-const { execFile } = require('child_process');
-const { promisify } = require('util');
-
-const execFileAsync = promisify(execFile);
+const { spawn } = require('child_process');
 
 /**
- * Execute an AppleScript string
+ * Execute an AppleScript string via stdin (handles multi-line scripts)
  * @param {string} script - The AppleScript code to execute
  * @returns {Promise<string>} - The script output
  */
 async function runAppleScript(script) {
-  try {
-    const { stdout, stderr } = await execFileAsync('osascript', ['-e', script], {
-      timeout: 30000,
-      maxBuffer: 1024 * 1024
+  return new Promise((resolve, reject) => {
+    const proc = spawn('osascript', ['-']);
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
     });
-    return stdout.trim();
-  } catch (error) {
-    throw new AppleScriptError(error.message, script);
-  }
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new AppleScriptError(stderr || stdout, script));
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new AppleScriptError(err.message, script));
+    });
+
+    // Write script to stdin
+    proc.stdin.write(script);
+    proc.stdin.end();
+  });
 }
 
 /**
- * Execute a JXA (JavaScript for Automation) script
+ * Execute a JXA (JavaScript for Automation) script via stdin
  * @param {string} script - The JXA code to execute
  * @returns {Promise<string>} - The script output
  */
 async function runJXA(script) {
-  try {
-    const { stdout, stderr } = await execFileAsync('osascript', ['-l', 'JavaScript', '-e', script], {
-      timeout: 30000,
-      maxBuffer: 1024 * 1024
+  return new Promise((resolve, reject) => {
+    const proc = spawn('osascript', ['-l', 'JavaScript', '-']);
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
     });
-    return stdout.trim();
-  } catch (error) {
-    throw new AppleScriptError(error.message, script);
-  }
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new AppleScriptError(stderr || stdout, script));
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new AppleScriptError(err.message, script));
+    });
+
+    // Write script to stdin
+    proc.stdin.write(script);
+    proc.stdin.end();
+  });
 }
 
 /**

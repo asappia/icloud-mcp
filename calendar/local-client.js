@@ -6,48 +6,71 @@
 const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, formatAppleScriptDate } = require('../utils/applescript');
 const config = require('../config');
 
+// iCloud calendars to query
+const ICLOUD_CALENDARS = ['Privado', 'Family', 'Sara', 'Trips', 'Yoli_Carlos'];
+
 /**
- * List upcoming events
+ * List upcoming events from iCloud calendars
  * @param {number} count - Number of events to retrieve
  * @param {number} daysAhead - Number of days to look ahead
  * @returns {Promise<Array>} - List of events
  */
 async function listEvents(count = 25, daysAhead = 30) {
+  const now = new Date();
+  const future = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+  // Use batch property access (only essential fields for speed)
   const script = `
     const calendar = Application('Calendar');
-    const now = new Date();
-    const future = new Date(now.getTime() + ${daysAhead} * 24 * 60 * 60 * 1000);
-    let events = [];
+    const targetCals = ${JSON.stringify(ICLOUD_CALENDARS)};
+    const calNames = calendar.calendars.name();
+    let allEvents = [];
 
-    const calendars = calendar.calendars();
-    for (let cal of calendars) {
+    for (let i = 0; i < targetCals.length; i++) {
+      const idx = calNames.indexOf(targetCals[i]);
+      if (idx === -1) continue;
+
       try {
-        const calEvents = cal.events();
-        for (let evt of calEvents) {
-          const startDate = evt.startDate();
-          if (startDate >= now && startDate <= future) {
-            events.push({
-              id: evt.uid(),
-              summary: evt.summary(),
-              description: evt.description() || '',
-              location: evt.location() || '',
-              startDate: startDate.toISOString(),
-              endDate: evt.endDate().toISOString(),
-              allDay: evt.alldayEvent(),
-              calendar: cal.name()
-            });
-          }
+        const cal = calendar.calendars[idx];
+        const evts = cal.events;
+        const uids = evts.uid();
+        const summaries = evts.summary();
+        const starts = evts.startDate();
+
+        const limit = Math.min(uids.length, 50);
+        for (let j = 0; j < limit; j++) {
+          allEvents.push({
+            id: uids[j],
+            summary: summaries[j] || '',
+            startDate: starts[j] ? starts[j].toISOString() : null,
+            calendar: targetCals[i]
+          });
         }
       } catch (e) {}
     }
 
-    // Sort by start date
-    events.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-    JSON.stringify(events.slice(0, ${count}));
+    JSON.stringify(allEvents);
   `;
 
-  const result = await runJXA(script);
-  return result ? JSON.parse(result) : [];
+  try {
+    const result = await runJXA(script);
+    if (!result) return [];
+
+    let events = JSON.parse(result);
+
+    // Filter to date range and sort
+    events = events.filter(e => {
+      if (!e.startDate) return false;
+      const start = new Date(e.startDate);
+      return start >= now && start <= future;
+    });
+
+    events.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+    return events.slice(0, count);
+  } catch (error) {
+    console.error('Calendar listEvents error:', error.message);
+    return [];
+  }
 }
 
 /**
@@ -55,17 +78,19 @@ async function listEvents(count = 25, daysAhead = 30) {
  * @returns {Promise<Array>} - List of calendars
  */
 async function listCalendars() {
+  // Use batch property access - JXA iteration causes AppleEvent errors
   const script = `
     const calendar = Application('Calendar');
-    const calendars = calendar.calendars();
-    let result = [];
+    const cals = calendar.calendars;
+    const names = cals.name();
+    const writables = cals.writable();
 
-    for (let cal of calendars) {
+    let result = [];
+    for (let i = 0; i < names.length; i++) {
       result.push({
-        name: cal.name(),
-        id: cal.id(),
-        color: cal.color() || '',
-        writable: cal.writable()
+        name: names[i],
+        id: names[i], // Use name as ID since cal.id() causes errors
+        writable: writables[i]
       });
     }
 

@@ -15,16 +15,23 @@ async function listReminderLists() {
     const lists = reminders.lists();
     let result = [];
 
-    for (let list of lists) {
-      const rems = list.reminders();
-      const incomplete = rems.filter(r => !r.completed()).length;
+    for (let i = 0; i < lists.length; i++) {
+      const list = lists[i];
+      let totalCount = 0;
+      let incompleteCount = 0;
+      try {
+        const rems = list.reminders();
+        totalCount = rems.length;
+        for (let j = 0; j < rems.length; j++) {
+          if (!rems[j].completed()) incompleteCount++;
+        }
+      } catch (e) {}
 
       result.push({
         id: list.id(),
         name: list.name(),
-        color: list.color() || '',
-        totalCount: rems.length,
-        incompleteCount: incomplete
+        totalCount: totalCount,
+        incompleteCount: incompleteCount
       });
     }
 
@@ -43,47 +50,42 @@ async function listReminderLists() {
  * @returns {Promise<Array>} - List of reminders
  */
 async function listReminders(listName = null, includeCompleted = false, count = 50) {
-  const listFilter = listName ? `.byName("${escapeJXA(listName)}")` : '';
-  const completedFilter = includeCompleted ? '' : '.filter(r => !r.completed())';
-
   const script = `
     const reminders = Application('Reminders');
     let allReminders = [];
+    const includeCompleted = ${includeCompleted};
+    const targetListName = ${listName ? `"${escapeJXA(listName)}"` : 'null'};
 
-    ${listName ? `
-    const list = reminders.lists${listFilter};
-    const rems = list.reminders()${completedFilter};
-    for (let r of rems) {
-      allReminders.push({
-        id: r.id(),
-        name: r.name(),
-        body: r.body() || '',
-        completed: r.completed(),
-        dueDate: r.dueDate() ? r.dueDate().toISOString() : null,
-        priority: r.priority(),
-        list: list.name()
-      });
-    }
-    ` : `
     const lists = reminders.lists();
-    for (let list of lists) {
-      const rems = list.reminders()${completedFilter};
-      for (let r of rems) {
-        allReminders.push({
-          id: r.id(),
-          name: r.name(),
-          body: r.body() || '',
-          completed: r.completed(),
-          dueDate: r.dueDate() ? r.dueDate().toISOString() : null,
-          priority: r.priority(),
-          list: list.name()
-        });
-      }
+    for (let i = 0; i < lists.length; i++) {
+      const list = lists[i];
+      if (targetListName && list.name() !== targetListName) continue;
+
+      try {
+        const rems = list.reminders();
+        for (let j = 0; j < rems.length; j++) {
+          const r = rems[j];
+          const isCompleted = r.completed();
+          if (!includeCompleted && isCompleted) continue;
+
+          let dueDate = null;
+          try { dueDate = r.dueDate() ? r.dueDate().toISOString() : null; } catch(e) {}
+
+          allReminders.push({
+            id: r.id(),
+            name: r.name(),
+            body: r.body() || '',
+            completed: isCompleted,
+            dueDate: dueDate,
+            priority: r.priority(),
+            list: list.name()
+          });
+        }
+      } catch (e) {}
     }
-    `}
 
     // Sort by due date (nulls at end)
-    allReminders.sort((a, b) => {
+    allReminders.sort(function(a, b) {
       if (!a.dueDate && !b.dueDate) return 0;
       if (!a.dueDate) return 1;
       if (!b.dueDate) return -1;
