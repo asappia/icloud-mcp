@@ -8,6 +8,27 @@ const useLocal = config.USE_LOCAL_MODE && config.IS_MACOS;
 const { listContacts, searchContacts, getContact, createContact, deleteContact } = useLocal ? require('./local-client') : require('./carddav-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 
+/** Normalize local (Contacts.app) and cloud (CardDAV) contact shapes */
+function contactDisplayName(contact) {
+  return contact.displayName || contact.name || `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || '(unnamed)';
+}
+
+function contactEmails(contact) {
+  if (Array.isArray(contact.emails)) return contact.emails;
+  if (contact.email) return [{ value: contact.email, type: 'email' }];
+  return [];
+}
+
+function contactPhones(contact) {
+  if (Array.isArray(contact.phones)) return contact.phones;
+  if (contact.phone) return [{ value: contact.phone, type: 'phone' }];
+  return [];
+}
+
+function contactRef(contact) {
+  return contact.url || contact.id || '';
+}
+
 /**
  * Handler: List contacts
  */
@@ -21,18 +42,21 @@ async function handleListContacts(args) {
   }
 
   const lines = contacts.map((contact, i) => {
-    let line = `${i + 1}. ${contact.displayName}`;
+    const emails = contactEmails(contact);
+    const phones = contactPhones(contact);
+    let line = `${i + 1}. ${contactDisplayName(contact)}`;
 
-    if (contact.emails.length > 0) {
-      line += `\n   Email: ${contact.emails[0].value}`;
+    if (emails.length > 0) {
+      line += `\n   Email: ${emails[0].value}`;
     }
-    if (contact.phones.length > 0) {
-      line += `\n   Phone: ${contact.phones[0].value}`;
+    if (phones.length > 0) {
+      line += `\n   Phone: ${phones[0].value}`;
     }
     if (contact.organization) {
       line += `\n   Company: ${contact.organization}`;
     }
-    line += `\n   URL: ${contact.url}`;
+    const ref = contactRef(contact);
+    if (ref) line += `\n   ID: ${ref}`;
 
     return line;
   });
@@ -56,18 +80,21 @@ async function handleSearchContacts(args) {
   }
 
   const lines = contacts.map((contact, i) => {
-    let line = `${i + 1}. ${contact.displayName}`;
+    const emails = contactEmails(contact);
+    const phones = contactPhones(contact);
+    let line = `${i + 1}. ${contactDisplayName(contact)}`;
 
-    if (contact.emails.length > 0) {
-      line += `\n   Email: ${contact.emails[0].value}`;
+    if (emails.length > 0) {
+      line += `\n   Email: ${emails[0].value}`;
     }
-    if (contact.phones.length > 0) {
-      line += `\n   Phone: ${contact.phones[0].value}`;
+    if (phones.length > 0) {
+      line += `\n   Phone: ${phones[0].value}`;
     }
     if (contact.organization) {
       line += `\n   Company: ${contact.organization}`;
     }
-    line += `\n   URL: ${contact.url}`;
+    const ref = contactRef(contact);
+    if (ref) line += `\n   ID: ${ref}`;
 
     return line;
   });
@@ -79,24 +106,31 @@ async function handleSearchContacts(args) {
  * Handler: Read contact
  */
 async function handleReadContact(args) {
-  if (!args.contactUrl) {
-    return formatError(new Error('Contact URL is required'));
+  const contactRefArg = args.contactUrl || args.contactId;
+  if (!contactRefArg) {
+    return formatError(new Error('Contact URL or ID is required'));
   }
 
-  const contact = await getContact(args.contactUrl);
+  const contact = await getContact(contactRefArg);
+  if (!contact) {
+    return formatError(new Error('Contact not found'));
+  }
 
-  const emailList = contact.emails.length > 0
-    ? contact.emails.map(e => `  - ${e.value} (${e.type})`).join('\n')
+  const emails = contactEmails(contact);
+  const phones = contactPhones(contact);
+
+  const emailList = emails.length > 0
+    ? emails.map(e => `  - ${e.value} (${e.type || e.label || 'email'})`).join('\n')
     : '  (none)';
 
-  const phoneList = contact.phones.length > 0
-    ? contact.phones.map(p => `  - ${p.value} (${p.type})`).join('\n')
+  const phoneList = phones.length > 0
+    ? phones.map(p => `  - ${p.value} (${p.type || p.label || 'phone'})`).join('\n')
     : '  (none)';
 
   return formatSuccess(
     `Contact Details:
 
-Name: ${contact.displayName}
+Name: ${contactDisplayName(contact)}
 First Name: ${contact.firstName || '(not set)'}
 Last Name: ${contact.lastName || '(not set)'}
 
@@ -107,12 +141,12 @@ Phones:
 ${phoneList}
 
 Organization: ${contact.organization || '(not set)'}
-Title: ${contact.title || '(not set)'}
+Title: ${contact.title || contact.jobTitle || '(not set)'}
 
-Notes: ${contact.notes || '(none)'}
+Notes: ${contact.notes || contact.note || '(none)'}
 
-URL: ${contact.url}
-UID: ${contact.uid}`
+ID: ${contactRef(contact)}
+UID: ${contact.uid || contact.id || '(n/a)'}`
   );
 }
 
@@ -137,8 +171,10 @@ async function handleCreateContact(args) {
 
   const name = args.displayName || `${args.firstName || ''} ${args.lastName || ''}`.trim();
 
+  const uid = result.uid || result.id;
+
   return formatSuccess(
-    `Contact created successfully!\n\nName: ${name}${args.email ? `\nEmail: ${args.email}` : ''}${args.phone ? `\nPhone: ${args.phone}` : ''}${args.organization ? `\nOrganization: ${args.organization}` : ''}\nUID: ${result.uid}`
+    `Contact created successfully!\n\nName: ${name}${args.email ? `\nEmail: ${args.email}` : ''}${args.phone ? `\nPhone: ${args.phone}` : ''}${args.organization ? `\nOrganization: ${args.organization}` : ''}\nID: ${uid}`
   );
 }
 
@@ -146,11 +182,12 @@ async function handleCreateContact(args) {
  * Handler: Delete contact
  */
 async function handleDeleteContact(args) {
-  if (!args.contactUrl) {
-    return formatError(new Error('Contact URL is required'));
+  const contactRefArg = args.contactUrl || args.contactId;
+  if (!contactRefArg) {
+    return formatError(new Error('Contact URL or ID is required'));
   }
 
-  await deleteContact(args.contactUrl);
+  await deleteContact(contactRefArg);
 
   return formatSuccess('Contact deleted successfully.');
 }
@@ -199,10 +236,14 @@ const contactsTools = [
       properties: {
         contactUrl: {
           type: 'string',
-          description: 'URL of the contact (from list-contacts output)'
+          description: 'Contact URL (cloud) or ID (local, from list-contacts output)'
+        },
+        contactId: {
+          type: 'string',
+          description: 'Contact ID in local mode (alias for contactUrl)'
         }
       },
-      required: ['contactUrl']
+      required: []
     },
     handler: withErrorHandler(handleReadContact, 'read-contact')
   },
@@ -257,10 +298,14 @@ const contactsTools = [
       properties: {
         contactUrl: {
           type: 'string',
-          description: 'URL of the contact to delete (from list-contacts output)'
+          description: 'Contact URL (cloud) or ID (local, from list-contacts output)'
+        },
+        contactId: {
+          type: 'string',
+          description: 'Contact ID in local mode (alias for contactUrl)'
         }
       },
-      required: ['contactUrl']
+      required: []
     },
     handler: withErrorHandler(handleDeleteContact, 'delete-contact')
   }

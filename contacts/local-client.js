@@ -166,7 +166,9 @@ async function readContact(contactId) {
  * @param {Object} options - Contact options
  * @returns {Promise<Object>} - Created contact info
  */
-async function createContact({ displayName, firstName, lastName, organization, jobTitle, email, phone, note }) {
+async function createContact({ displayName, firstName, lastName, organization, jobTitle, title, email, phone, note, notes }) {
+  jobTitle = jobTitle || title;
+  note = note || notes;
   let properties = [];
 
   if (firstName) properties.push(`first name:"${escapeAppleScript(firstName)}"`);
@@ -253,10 +255,14 @@ async function deleteContact(contactId) {
   return { success: true, message: 'Contact deleted successfully' };
 }
 
+/** Alias for carddav-client compatibility (contacts/index.js) */
+const getContact = readContact;
+
 module.exports = {
   listContacts,
   searchContacts,
   readContact,
+  getContact,
   createContact,
   updateContact,
   deleteContact

@@ -6,11 +6,8 @@
 const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, formatAppleScriptDate } = require('../utils/applescript');
 const config = require('../config');
 
-// iCloud calendars to query
-const ICLOUD_CALENDARS = ['Privado', 'Family', 'Sara', 'Trips', 'Yoli_Carlos'];
-
 /**
- * List upcoming events from iCloud calendars
+ * List upcoming events from all calendars
  * @param {number} count - Number of events to retrieve
  * @param {number} daysAhead - Number of days to look ahead
  * @returns {Promise<Array>} - List of events
@@ -22,28 +19,29 @@ async function listEvents(count = 25, daysAhead = 30) {
   // Use batch property access (only essential fields for speed)
   const script = `
     const calendar = Application('Calendar');
-    const targetCals = ${JSON.stringify(ICLOUD_CALENDARS)};
-    const calNames = calendar.calendars.name();
+    const cals = calendar.calendars;
+    const calNames = cals.name();
     let allEvents = [];
 
-    for (let i = 0; i < targetCals.length; i++) {
-      const idx = calNames.indexOf(targetCals[i]);
-      if (idx === -1) continue;
-
+    for (let i = 0; i < calNames.length; i++) {
       try {
-        const cal = calendar.calendars[idx];
+        const cal = cals[i];
         const evts = cal.events;
         const uids = evts.uid();
         const summaries = evts.summary();
         const starts = evts.startDate();
+        const ends = evts.endDate();
+        const allDayFlags = evts.alldayEvent();
 
-        const limit = Math.min(uids.length, 50);
+        const limit = Math.min(uids.length, 100);
         for (let j = 0; j < limit; j++) {
           allEvents.push({
             id: uids[j],
             summary: summaries[j] || '',
             startDate: starts[j] ? starts[j].toISOString() : null,
-            calendar: targetCals[i]
+            endDate: ends[j] ? ends[j].toISOString() : null,
+            isAllDay: allDayFlags[j] || false,
+            calendar: calNames[i]
           });
         }
       } catch (e) {}
@@ -66,7 +64,13 @@ async function listEvents(count = 25, daysAhead = 30) {
     });
 
     events.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-    return events.slice(0, count);
+    return events.slice(0, count).map((e) => ({
+      ...e,
+      start: e.startDate,
+      end: e.endDate || e.startDate,
+      calendarName: e.calendar,
+      url: e.id
+    }));
   } catch (error) {
     console.error('Calendar listEvents error:', error.message);
     return [];
@@ -106,12 +110,12 @@ async function listCalendars() {
  * @param {Object} options - Event options
  * @returns {Promise<Object>} - Created event info
  */
-async function createEvent({ summary, start, end, location, description, calendarName, allDay = false }) {
+async function createEvent({ summary, start, end, location, description, calendarName, calendarUrl, allDay = false }) {
   const startDate = new Date(start);
   const endDate = new Date(end);
 
-  // Use default calendar if none specified
-  const targetCalendar = calendarName || 'Calendar';
+  // calendarUrl from cloud tools maps to Calendar.app calendar name in local mode
+  const targetCalendar = calendarName || calendarUrl || 'Calendar';
 
   if (allDay) {
     // All-day event
@@ -127,7 +131,7 @@ async function createEvent({ summary, start, end, location, description, calenda
     `;
 
     const uid = await runAppleScript(script);
-    return { success: true, id: uid, message: 'Event created successfully' };
+    return { success: true, id: uid, uid, calendar: targetCalendar, message: 'Event created successfully' };
   } else {
     const script = `
       tell application "Calendar"
@@ -141,7 +145,7 @@ async function createEvent({ summary, start, end, location, description, calenda
     `;
 
     const uid = await runAppleScript(script);
-    return { success: true, id: uid, message: 'Event created successfully' };
+    return { success: true, id: uid, uid, calendar: targetCalendar, message: 'Event created successfully' };
   }
 }
 
@@ -212,9 +216,21 @@ async function deleteEvent(eventId) {
   return { success: true, message: 'Event deleted successfully' };
 }
 
+/**
+ * Alias for caldav-client compatibility (calendar/index.js)
+ */
+async function getCalendars() {
+  const calendars = await listCalendars();
+  return calendars.map((cal) => ({
+    displayName: cal.name,
+    url: cal.id || cal.name
+  }));
+}
+
 module.exports = {
   listEvents,
   listCalendars,
+  getCalendars,
   createEvent,
   updateEvent,
   deleteEvent
