@@ -43,7 +43,7 @@ Uses AppleScript to access native macOS apps. **Faster, works offline, more serv
 | **Messages** | Messages.app | 1 |
 | **Safari** | Safari.app | 4 |
 | **Music** | Music.app | 7 |
-| **iCloud Drive** | Local sync folder | 3 |
+| **iCloud Drive** | Local sync folder | 6 |
 
 ### Cloud Mode - Works Anywhere
 Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
@@ -214,14 +214,17 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 | `music-search-library` | Search library tracks |
 | `music-play-track` | Play first search match |
 
-### iCloud Drive (3) - Local Only
+### iCloud Drive (6) - Local Only
 
 Reads the **local sync folder** (`~/Library/Mobile Documents/com~apple~CloudDocs`), not the CloudKit API.
 
 | Tool | Description |
 |------|-------------|
 | `icloud-drive-info` | Show sync folder path |
+| `icloud-drive-summary` | Overview by top-level folder (size, file count) |
 | `list-icloud-files` | List files/folders |
+| `scan-icloud-drive` | Full inventory (paths, sizes, dates) |
+| `search-icloud-files` | Search by name/path |
 | `read-icloud-file` | Read small text files (max 512KB) |
 
 ---
