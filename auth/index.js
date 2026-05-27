@@ -68,7 +68,9 @@ Services available:
 - Reminders (Reminders.app)
 - Notes (Notes.app)
 - Messages (Messages.app)
-- Safari (Safari.app)`
+- Safari (Safari.app)
+- Music (Music.app)
+- iCloud Drive files (local sync folder)`
     );
   }
 

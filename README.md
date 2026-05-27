@@ -42,6 +42,8 @@ Uses AppleScript to access native macOS apps. **Faster, works offline, more serv
 | **Notes** | Notes.app | 5 |
 | **Messages** | Messages.app | 1 |
 | **Safari** | Safari.app | 4 |
+| **Music** | Music.app | 7 |
+| **iCloud Drive** | Local sync folder | 3 |
 
 ### Cloud Mode - Works Anywhere
 Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
@@ -56,9 +58,9 @@ Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
 
 ## Features
 
-- **31 Tools** in local mode (17 in cloud mode)
+- **44 Tools** in local mode (17 in cloud mode)
 - **Dual Mode** - switch between local (fast) and cloud (remote access)
-- **7 Services** - Email, Calendar, Contacts, Reminders, Notes, Messages, Safari
+- **9 Services** - Email, Calendar, Contacts, Reminders, Notes, Messages, Safari, Music, iCloud Drive (sync)
 - **Secure Authentication** - AppleScript permissions or app-specific passwords
 - **Full CRUD** - create, read, update, delete across services
 
@@ -200,6 +202,28 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 | `open-safari-url` | Open URL in new tab |
 | `close-safari-tab` | Close a tab |
 
+### Music (7) - Local Only
+
+| Tool | Description |
+|------|-------------|
+| `music-now-playing` | Current track and player state |
+| `music-playback` | Play, pause, skip, etc. |
+| `music-set-volume` | Set volume 0-100 |
+| `music-list-playlists` | List user playlists |
+| `music-play-playlist` | Play a playlist by name |
+| `music-search-library` | Search library tracks |
+| `music-play-track` | Play first search match |
+
+### iCloud Drive (3) - Local Only
+
+Reads the **local sync folder** (`~/Library/Mobile Documents/com~apple~CloudDocs`), not the CloudKit API.
+
+| Tool | Description |
+|------|-------------|
+| `icloud-drive-info` | Show sync folder path |
+| `list-icloud-files` | List files/folders |
+| `read-icloud-file` | Read small text files (max 512KB) |
+
 ---
 
 ## Architecture
@@ -226,6 +250,8 @@ icloud-mcp/
 ├── notes/                # Local only
 ├── messages/             # Local only
 ├── safari/               # Local only
+├── music/                # Local only (Music.app)
+├── files/                # Local only (iCloud Drive sync folder)
 └── utils/
     ├── applescript.js    # AppleScript executor
     ├── date-utils.js
@@ -270,8 +296,8 @@ icloud-mcp/
 | Speed | Fast (~100ms) | Slower (~500ms+) |
 | Works offline | ✅ | ❌ |
 | Remote access | ❌ | ✅ |
-| Services | 7 | 3 |
-| Tools | 31 | 17 |
+| Services | 9 | 3 |
+| Tools | 44 | 17 |
 | Requirements | macOS | App-specific password |
 
 ---
@@ -282,7 +308,8 @@ icloud-mcp/
 |---------|--------|--------|
 | Read Messages | ❌ | macOS security limitation |
 | Edit Notes | ⚠️ Limited | AppleScript limitation |
-| iCloud Drive | ❌ | Requires CloudKit |
+| iCloud Drive (full cloud API) | ⚠️ Partial | Local sync folder only via `files/` tools; no CloudKit |
+| HomeKit | ❌ | No AppleScript API; use a dedicated HomeKit MCP |
 | Find My | ❌ | Internal API only |
 
 ---

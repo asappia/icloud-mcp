@@ -22,6 +22,8 @@ This MCP server provides Claude with access to Apple services via two modes:
 | **Notes** | Notes.app (AppleScript) | 5 |
 | **Messages** | Messages.app (AppleScript) | 1 |
 | **Safari** | Safari.app (AppleScript) | 4 |
+| **Music** | Music.app (AppleScript) | 7 |
+| **iCloud Drive** | Local sync folder (fs) | 3 |
 
 ### Cloud Mode
 
@@ -83,15 +85,15 @@ icloud-mcp/
 │   ├── local-client.js
 │   └── index.js
 ├── safari/               # Safari (local only)
-│   ├── local-client.js
-│   └── index.js
+├── music/                # Music.app (local only)
+├── files/                # iCloud Drive sync folder (local only)
 └── utils/
     ├── applescript.js    # AppleScript executor
     ├── date-utils.js
     └── error-handler.js
 ```
 
-## Tools (31 total in local mode)
+## Tools (44 total in local mode)
 
 ### Auth (2)
 - `about` - Server information
@@ -161,7 +163,8 @@ Grant access in **System Settings > Privacy & Security > Automation**.
 
 | Feature | Status | Reason |
 |---------|--------|--------|
-| iCloud Drive | ❌ | Requires CloudKit |
+| iCloud Drive (CloudKit API) | ⚠️ | Local sync folder only in `files/` |
+| HomeKit | ❌ | No AppleScript API |
 | Find My | ❌ | Internal API only |
 | Read Messages | ❌ | macOS limitation |
 | Edit Notes | ⚠️ Limited | AppleScript limitation |
