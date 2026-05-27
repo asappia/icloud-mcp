@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "test-mode": "USE_TEST_MODE=true node index.js",
-    "inspect": "npx @anthropics/inspector node index.js"
+    "inspect": "npx -y @modelcontextprotocol/inspector node index.js"
   },
   "keywords": [
     "mcp",
