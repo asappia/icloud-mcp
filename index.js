@@ -11,6 +11,8 @@
  * - Notes (via Notes.app - local only)
  * - Messages (via Messages.app - local only)
  * - Safari (via Safari.app - local only)
+ * - Music (via Music.app - local only)
+ * - iCloud Drive files (local sync folder - local only)
  *
  * Modes:
  * - LOCAL (default): Uses AppleScript to access native macOS apps (fast, requires Mac)
@@ -39,6 +41,8 @@ if (config.USE_LOCAL_MODE && config.IS_MACOS) {
   const { notesTools } = require('./notes');
   const { messagesTools } = require('./messages');
   const { safariTools } = require('./safari');
+  const { musicTools } = require('./music');
+  const { filesTools } = require('./files');
 
   // Import existing modules (they still work, cloud tools available)
   const { emailTools } = require('./email');
@@ -54,7 +58,9 @@ if (config.USE_LOCAL_MODE && config.IS_MACOS) {
     ...remindersTools,
     ...notesTools,
     ...messagesTools,
-    ...safariTools
+    ...safariTools,
+    ...musicTools,
+    ...filesTools
   ];
 
 } else if (config.USE_LOCAL_MODE && !config.IS_MACOS) {
@@ -191,7 +197,7 @@ function startServer() {
   console.error(`[icloud-mcp] Tools available: ${TOOLS.length}`);
 
   if (MODE === 'local') {
-    console.error('[icloud-mcp] Services: Email, Calendar, Contacts, Reminders, Notes, Messages, Safari');
+    console.error('[icloud-mcp] Services: Email, Calendar, Contacts, Reminders, Notes, Messages, Safari, Music, iCloud Drive');
   } else {
     console.error('[icloud-mcp] Services: Email, Calendar, Contacts');
     console.error(`[icloud-mcp] Credentials configured: ${!!(config.ICLOUD_EMAIL && config.ICLOUD_APP_PASSWORD)}`);
