@@ -103,6 +103,164 @@ async function listFiles(relativePath = '', { recursive = false, maxDepth = 2 } 
   return results;
 }
 
+/**
+ * Walk the drive and collect file metadata (for inventory / search)
+ */
+async function walkDrive({
+  relativePath = '',
+  maxDepth = 8,
+  maxFiles = 5000
+} = {}) {
+  const files = [];
+  const errors = [];
+
+  async function walk(rel, depth) {
+    if (files.length >= maxFiles || depth > maxDepth) return;
+
+    let dirPath;
+    try {
+      dirPath = resolveSafePath(rel);
+    } catch (e) {
+      errors.push({ path: rel, error: e.message });
+      return;
+    }
+
+    let entries;
+    try {
+      entries = await fs.readdir(dirPath, { withFileTypes: true });
+    } catch (e) {
+      errors.push({ path: rel, error: e.message });
+      return;
+    }
+
+    for (const entry of entries) {
+      if (files.length >= maxFiles) break;
+      if (entry.name.startsWith('.')) continue;
+
+      const childRel = rel ? path.join(rel, entry.name) : entry.name;
+      const fullPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        await walk(childRel, depth + 1);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+
+      try {
+        const st = await fs.stat(fullPath);
+        files.push({
+          path: childRel,
+          name: entry.name,
+          size: st.size,
+          modified: st.mtime.toISOString(),
+          extension: path.extname(entry.name).toLowerCase() || '(none)'
+        });
+      } catch (e) {
+        files.push({
+          path: childRel,
+          name: entry.name,
+          size: null,
+          modified: null,
+          extension: path.extname(entry.name).toLowerCase() || '(none)',
+          cloudOnly: true,
+          error: e.message
+        });
+      }
+    }
+  }
+
+  await walk(relativePath, 0);
+
+  return {
+    scannedFrom: relativePath || '.',
+    fileCount: files.length,
+    truncated: files.length >= maxFiles,
+    files,
+    errors
+  };
+}
+
+/**
+ * Top-level folder summary (size, file count) — good overview when iCloud is messy
+ */
+async function getDriveSummary() {
+  const root = resolveSafePath('');
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const folders = [];
+  let rootFileCount = 0;
+  let rootSize = 0;
+
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+
+    const rel = entry.name;
+    const fullPath = path.join(root, entry.name);
+
+    if (entry.isFile()) {
+      try {
+        const st = await fs.stat(fullPath);
+        rootFileCount += 1;
+        rootSize += st.size;
+      } catch {
+        rootFileCount += 1;
+      }
+      continue;
+    }
+
+    if (!entry.isDirectory()) continue;
+
+    const walkResult = await walkDrive({ relativePath: rel, maxDepth: 6, maxFiles: 2000 });
+    const sizes = walkResult.files.filter((f) => f.size != null).map((f) => f.size);
+    const totalSize = sizes.reduce((a, b) => a + b, 0);
+
+    folders.push({
+      name: rel,
+      path: rel,
+      fileCount: walkResult.fileCount,
+      totalSizeBytes: totalSize,
+      truncated: walkResult.truncated,
+      cloudOnlyCount: walkResult.files.filter((f) => f.cloudOnly).length
+    });
+  }
+
+  folders.sort((a, b) => b.totalSizeBytes - a.totalSizeBytes);
+
+  return {
+    root: getRoot(),
+    rootLevelFiles: rootFileCount,
+    rootLevelSizeBytes: rootSize,
+    folders,
+    totalFolders: folders.length
+  };
+}
+
+/**
+ * Search files by name (substring match)
+ */
+async function searchFiles(query, { maxResults = 100, maxScan = 5000 } = {}) {
+  const q = query.toLowerCase();
+  const walkResult = await walkDrive({ maxFiles: maxScan });
+  const matches = walkResult.files
+    .filter((f) => f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q))
+    .slice(0, maxResults);
+
+  return {
+    query,
+    matchCount: matches.length,
+    truncated: walkResult.truncated || matches.length >= maxResults,
+    matches
+  };
+}
+
+function formatBytes(bytes) {
+  if (bytes == null) return 'unknown';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 async function readFileText(relativePath, maxBytes = MAX_READ_BYTES) {
   const filePath = resolveSafePath(relativePath);
   const stat = await fs.stat(filePath);
@@ -137,6 +295,10 @@ module.exports = {
   getDriveInfo,
   listFiles,
   readFileText,
+  walkDrive,
+  getDriveSummary,
+  searchFiles,
+  formatBytes,
   getRoot,
   MAX_READ_BYTES
 };
