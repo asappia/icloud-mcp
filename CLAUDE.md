@@ -36,7 +36,7 @@ This MCP server provides Claude with access to Apple services via two modes:
 ```bash
 npm install          # Install dependencies
 npm start            # Start server (local mode by default)
-npm run inspect      # Test with MCP Inspector
+npm run inspect      # Test with @modelcontextprotocol/inspector
 
 # Cloud mode
 USE_LOCAL_MODE=false npm start
