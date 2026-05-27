@@ -23,14 +23,17 @@ async function handleListEvents(args) {
   }
 
   const lines = events.map((event, i) => {
+    const start = event.start || event.startDate;
+    const end = event.end || event.endDate || start;
     const dateStr = event.isAllDay
-      ? `All day: ${formatDate(event.start, { hour: undefined, minute: undefined })}`
-      : `${formatDate(event.start)} - ${formatDate(event.end, { year: undefined, month: undefined, day: undefined })}`;
+      ? `All day: ${formatDate(start, { hour: undefined, minute: undefined })}`
+      : `${formatDate(start)} - ${formatDate(end, { year: undefined, month: undefined, day: undefined })}`;
 
-    let line = `${i + 1}. ${event.summary}\n   ${dateStr}`;
+    let line = `${i + 1}. ${event.summary || '(No title)'}\n   ${dateStr}`;
     if (event.location) line += `\n   Location: ${event.location}`;
-    if (event.calendarName) line += `\n   Calendar: ${event.calendarName}`;
-    line += `\n   URL: ${event.url}`;
+    const calName = event.calendarName || event.calendar;
+    if (calName) line += `\n   Calendar: ${calName}`;
+    line += `\n   ID: ${event.url || event.id}`;
 
     return line;
   });
@@ -58,11 +61,15 @@ async function handleCreateEvent(args) {
     end: args.end,
     description: args.description,
     location: args.location,
-    calendarUrl: args.calendarUrl
+    calendarUrl: args.calendarUrl,
+    calendarName: args.calendarName || args.calendarUrl
   });
 
+  const calendarLabel = result.calendar || result.calendarName || args.calendarName || 'default';
+  const eventId = result.uid || result.id;
+
   return formatSuccess(
-    `Event created successfully!\n\nTitle: ${args.summary}\nStart: ${formatDate(new Date(args.start))}\nEnd: ${formatDate(new Date(args.end))}${args.location ? `\nLocation: ${args.location}` : ''}\nCalendar: ${result.calendar}\nUID: ${result.uid}`
+    `Event created successfully!\n\nTitle: ${args.summary}\nStart: ${formatDate(new Date(args.start))}\nEnd: ${formatDate(new Date(args.end))}${args.location ? `\nLocation: ${args.location}` : ''}\nCalendar: ${calendarLabel}\nID: ${eventId}`
   );
 }
 
@@ -74,7 +81,7 @@ async function handleDeleteEvent(args) {
     return formatError(new Error('Event URL is required'));
   }
 
-  await deleteEvent(args.eventUrl);
+  await deleteEvent(args.eventUrl || args.eventId);
 
   return formatSuccess(`Event deleted successfully.`);
 }
