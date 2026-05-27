@@ -8,6 +8,15 @@
 function formatError(error, context = '') {
   const prefix = context ? `[${context}] ` : '';
 
+  if (error.message?.startsWith('ICLOUD_TOOLS_NOT_INSTALLED')) {
+    return {
+      content: [{
+        type: 'text',
+        text: `${prefix}${error.message.replace('ICLOUD_TOOLS_NOT_INSTALLED: ', '')}`
+      }]
+    };
+  }
+
   if (error.message === 'UNAUTHORIZED' || error.message?.includes('authentication')) {
     return {
       content: [{

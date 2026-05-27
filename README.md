@@ -43,7 +43,7 @@ Uses AppleScript to access native macOS apps. **Faster, works offline, more serv
 | **Messages** | Messages.app | 1 |
 | **Safari** | Safari.app | 4 |
 | **Music** | Music.app | 7 |
-| **iCloud Drive** | Local sync folder | 6 |
+| **iCloud Drive** | Local sync + icloud-tools CLI | 9 |
 
 ### Cloud Mode - Works Anywhere
 Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
@@ -58,7 +58,7 @@ Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
 
 ## Features
 
-- **44 Tools** in local mode (17 in cloud mode)
+- **47 Tools** in local mode (17 in cloud mode)
 - **Dual Mode** - switch between local (fast) and cloud (remote access)
 - **9 Services** - Email, Calendar, Contacts, Reminders, Notes, Messages, Safari, Music, iCloud Drive (sync)
 - **Secure Authentication** - AppleScript permissions or app-specific passwords
