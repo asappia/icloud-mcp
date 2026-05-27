@@ -4,6 +4,7 @@
 
 const localClient = require('./local-client');
 const icloudTools = require('./icloud-tools-client');
+const spotlight = require('./spotlight-client');
 const { handleError } = require('../utils/error-handler');
 
 async function requireIcloudTools() {
@@ -112,6 +113,143 @@ const filesTools = [
     }
   },
   {
+    name: 'icloud-move',
+    description: 'Move/organize files in iCloud Drive using icloud-tools (handles cloud-only files safely)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sources: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'One or more source paths relative to iCloud Drive root'
+        },
+        destination: {
+          type: 'string',
+          description: 'Destination path relative to iCloud Drive root'
+        },
+        dryRun: { type: 'boolean', description: 'Preview operations only' },
+        force: { type: 'boolean', description: 'Overwrite existing destination files' },
+        noClobber: { type: 'boolean', description: 'Skip files that already exist at destination' }
+      },
+      required: ['sources', 'destination']
+    },
+    handler: async ({ sources, destination, dryRun = false, force = false, noClobber = false }) => {
+      try {
+        await requireIcloudTools();
+        const result = await icloudTools.move(sources, destination, { dryRun, force, noClobber });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-move');
+      }
+    }
+  },
+  {
+    name: 'icloud-copy',
+    description: 'Copy files/folders in iCloud Drive using icloud-tools',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sources: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'One or more source paths relative to iCloud Drive root'
+        },
+        destination: {
+          type: 'string',
+          description: 'Destination path relative to iCloud Drive root'
+        },
+        recursive: { type: 'boolean', description: 'Required for folder copy (default: false)' },
+        dryRun: { type: 'boolean', description: 'Preview only' },
+        force: { type: 'boolean', description: 'Overwrite destination files' },
+        noClobber: { type: 'boolean', description: 'Skip existing files' }
+      },
+      required: ['sources', 'destination']
+    },
+    handler: async ({ sources, destination, recursive = false, dryRun = false, force = false, noClobber = false }) => {
+      try {
+        await requireIcloudTools();
+        const result = await icloudTools.copy(sources, destination, {
+          recursive,
+          dryRun,
+          force,
+          noClobber
+        });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-copy');
+      }
+    }
+  },
+  {
+    name: 'icloud-mkdir',
+    description: 'Create a folder in iCloud Drive',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Folder path relative to iCloud Drive root' }
+      },
+      required: ['path']
+    },
+    handler: async ({ path: relPath }) => {
+      try {
+        const result = await localClient.createDirectory(relPath);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-mkdir');
+      }
+    }
+  },
+  {
+    name: 'icloud-rename',
+    description: 'Rename/move a file or folder in iCloud Drive',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fromPath: { type: 'string', description: 'Existing path relative to iCloud Drive root' },
+        toPath: { type: 'string', description: 'New path relative to iCloud Drive root' },
+        useIcloudTools: {
+          type: 'boolean',
+          description: 'Use icloud-tools move semantics for cloud-only files (default: true)'
+        }
+      },
+      required: ['fromPath', 'toPath']
+    },
+    handler: async ({ fromPath, toPath, useIcloudTools = true }) => {
+      try {
+        let result;
+        if (useIcloudTools && await icloudTools.isAvailable()) {
+          await requireIcloudTools();
+          result = await icloudTools.move([fromPath], toPath, {});
+        } else {
+          result = await localClient.renamePath(fromPath, toPath);
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-rename');
+      }
+    }
+  },
+  {
+    name: 'icloud-delete',
+    description: 'Delete a file or folder from iCloud Drive',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path relative to iCloud Drive root' },
+        recursive: { type: 'boolean', description: 'Delete folder recursively (default: true)' }
+      },
+      required: ['path']
+    },
+    handler: async ({ path: relPath, recursive = true }) => {
+      try {
+        const result = await localClient.deletePath(relPath, recursive);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-delete');
+      }
+    }
+  },
+  {
     name: 'list-icloud-files',
     description: 'List files and folders in your local iCloud Drive sync folder (not cloud-only placeholders)',
     inputSchema: {
@@ -209,6 +347,58 @@ const filesTools = [
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
         return handleError(error, 'search-icloud-files');
+      }
+    }
+  },
+  {
+    name: 'icloud-spotlight-search',
+    description: 'Search iCloud Drive via macOS Spotlight index (name/content metadata)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Raw mdfind query (e.g. "invoice", "kMDItemFSName == \\\"*.pdf\\\"c")'
+        },
+        path: {
+          type: 'string',
+          description: 'Restrict search under this iCloud Drive subfolder (default: root)'
+        },
+        maxResults: {
+          type: 'number',
+          description: 'Maximum results to return (default: 100)'
+        }
+      },
+      required: ['query']
+    },
+    handler: async ({ query, path: relPath = '', maxResults = 100 }) => {
+      try {
+        const result = await spotlight.searchSpotlight(query, {
+          onlyInRelativePath: relPath,
+          maxResults
+        });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-spotlight-search');
+      }
+    }
+  },
+  {
+    name: 'icloud-file-metadata',
+    description: 'Read Spotlight metadata (mdls) for an iCloud Drive file',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File path relative to iCloud Drive root' }
+      },
+      required: ['path']
+    },
+    handler: async ({ path: relPath }) => {
+      try {
+        const result = await spotlight.getMetadata(relPath);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-file-metadata');
       }
     }
   },
