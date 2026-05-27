@@ -61,7 +61,7 @@ icloud-mcp/
 ├── config.js             # Configuration
 ├── auth/                 # Credential management
 ├── email/                # Email module
-│   ├── imap-client.js    # Cloud: IMAP
+│   ├── imap-client.js    # Cloud: IMAP (ImapFlow)
 │   ├── smtp-client.js    # Cloud: SMTP
 │   ├── local-client.js   # Local: Mail.app
 │   └── index.js          # Tool definitions
