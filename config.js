@@ -3,7 +3,14 @@
  * Centralized configuration for all iCloud services
  */
 
-require('dotenv').config();
+// Load .env silently. Node 22+ has process.loadEnvFile() built-in (no stdout output,
+// which is critical for MCP stdio transport where any non-JSON on stdout breaks the protocol).
+// Falls back gracefully if .env is missing (env vars may be set externally).
+try {
+  process.loadEnvFile();
+} catch (e) {
+  // .env not present or not readable — that's fine in cloud/container deployments
+}
 
 module.exports = {
   // Mode flags
