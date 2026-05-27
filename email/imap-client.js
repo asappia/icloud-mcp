@@ -1,57 +1,123 @@
 /**
- * IMAP client wrapper for iCloud Mail
+ * IMAP client wrapper for iCloud Mail (via ImapFlow)
  */
 
-const Imap = require('imap');
+const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const config = require('../config');
 const { getCredentials } = require('../auth');
 
 /**
- * Create IMAP connection
+ * Create ImapFlow client
  */
-function createConnection() {
+function createClient() {
   const creds = getCredentials();
 
-  return new Imap({
-    user: creds.email,
-    password: creds.password,
+  return new ImapFlow({
     host: config.IMAP.HOST,
     port: config.IMAP.PORT,
-    tls: config.IMAP.TLS,
-    authTimeout: config.IMAP.AUTH_TIMEOUT,
-    connTimeout: config.IMAP.CONN_TIMEOUT
+    secure: config.IMAP.TLS,
+    auth: {
+      user: creds.email,
+      pass: creds.password
+    },
+    logger: false,
+    connectionTimeout: config.IMAP.CONN_TIMEOUT,
+    greetingTimeout: config.IMAP.AUTH_TIMEOUT
   });
 }
 
+function isAuthError(err) {
+  const message = err?.responseText || err?.message || '';
+  return (
+    err?.authenticationFailed === true ||
+    message.includes('AUTHENTICATIONFAILED') ||
+    message.includes('Invalid credentials')
+  );
+}
+
 /**
- * Execute IMAP operation with connection management
+ * Run an operation with connect + mailbox lock
  */
-function withImap(operation) {
-  return new Promise((resolve, reject) => {
-    const imap = createConnection();
+async function withMailbox(folder, readOnly, operation) {
+  const client = createClient();
 
-    imap.once('ready', async () => {
-      try {
-        const result = await operation(imap);
-        imap.end();
-        resolve(result);
-      } catch (err) {
-        imap.end();
-        reject(err);
-      }
-    });
+  try {
+    await client.connect();
+  } catch (err) {
+    if (isAuthError(err)) {
+      throw new Error('UNAUTHORIZED');
+    }
+    throw err;
+  }
 
-    imap.once('error', (err) => {
-      if (err.message?.includes('AUTHENTICATIONFAILED')) {
-        reject(new Error('UNAUTHORIZED'));
-      } else {
-        reject(err);
-      }
-    });
+  try {
+    const folderName = getFolderName(folder);
+    const lock = await client.getMailboxLock(folderName, { readOnly });
 
-    imap.connect();
-  });
+    try {
+      return await operation(client);
+    } finally {
+      lock.release();
+    }
+  } finally {
+    if (client.usable) {
+      await client.logout();
+    }
+  }
+}
+
+/**
+ * Format envelope address list for display
+ */
+function formatAddresses(addresses) {
+  if (!addresses?.length) {
+    return '';
+  }
+
+  return addresses
+    .map((entry) => (entry.name ? `${entry.name} <${entry.address}>` : entry.address))
+    .join(', ');
+}
+
+function mapListMessage(message) {
+  return {
+    uid: message.uid,
+    seqno: message.seq,
+    from: formatAddresses(message.envelope?.from),
+    to: formatAddresses(message.envelope?.to),
+    subject: message.envelope?.subject || '(No subject)',
+    date: message.envelope?.date || '',
+    flags: message.flags ? Array.from(message.flags) : []
+  };
+}
+
+/**
+ * Build ImapFlow search query from tool criteria
+ */
+function buildSearchQuery(criteria) {
+  const query = {};
+
+  if (criteria.from) {
+    query.from = criteria.from;
+  }
+  if (criteria.subject) {
+    query.subject = criteria.subject;
+  }
+  if (criteria.since) {
+    query.since = new Date(criteria.since);
+  }
+  if (criteria.before) {
+    query.before = new Date(criteria.before);
+  }
+  if (criteria.unseen) {
+    query.seen = false;
+  }
+  if (criteria.text) {
+    query.body = criteria.text;
+  }
+
+  return Object.keys(query).length > 0 ? query : { all: true };
 }
 
 /**
@@ -66,65 +132,25 @@ function getFolderName(folder) {
  * List emails from a folder
  */
 async function listEmails(folder = 'inbox', count = 25) {
-  return withImap(async (imap) => {
-    return new Promise((resolve, reject) => {
-      const folderName = getFolderName(folder);
+  return withMailbox(folder, true, async (client) => {
+    const total = client.mailbox.exists;
+    if (!total) {
+      return [];
+    }
 
-      imap.openBox(folderName, true, (err, box) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+    const start = Math.max(1, total - count + 1);
+    const emails = [];
 
-        const total = box.messages.total;
-        if (total === 0) {
-          resolve([]);
-          return;
-        }
+    for await (const message of client.fetch(`${start}:*`, {
+      envelope: true,
+      flags: true,
+      uid: true
+    })) {
+      emails.push(mapListMessage(message));
+    }
 
-        // Fetch most recent emails
-        const start = Math.max(1, total - count + 1);
-        const range = `${start}:${total}`;
-
-        const emails = [];
-        const fetch = imap.seq.fetch(range, {
-          bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)'],
-          struct: true
-        });
-
-        fetch.on('message', (msg, seqno) => {
-          const email = { seqno, uid: null };
-
-          msg.on('body', (stream, info) => {
-            let buffer = '';
-            stream.on('data', (chunk) => buffer += chunk.toString('utf8'));
-            stream.on('end', () => {
-              const headers = Imap.parseHeader(buffer);
-              email.from = headers.from?.[0] || '';
-              email.to = headers.to?.[0] || '';
-              email.subject = headers.subject?.[0] || '(No subject)';
-              email.date = headers.date?.[0] || '';
-            });
-          });
-
-          msg.once('attributes', (attrs) => {
-            email.uid = attrs.uid;
-            email.flags = attrs.flags || [];
-          });
-
-          msg.once('end', () => {
-            emails.push(email);
-          });
-        });
-
-        fetch.once('error', reject);
-        fetch.once('end', () => {
-          // Sort by date descending (newest first)
-          emails.sort((a, b) => new Date(b.date) - new Date(a.date));
-          resolve(emails);
-        });
-      });
-    });
+    emails.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return emails;
   });
 }
 
@@ -132,50 +158,30 @@ async function listEmails(folder = 'inbox', count = 25) {
  * Read full email content
  */
 async function readEmail(uid, folder = 'inbox') {
-  return withImap(async (imap) => {
-    return new Promise((resolve, reject) => {
-      const folderName = getFolderName(folder);
+  return withMailbox(folder, true, async (client) => {
+    const message = await client.fetchOne(uid, { source: true }, { uid: true });
 
-      imap.openBox(folderName, true, (err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+    if (!message?.source) {
+      throw new Error(`Message not found: ${uid}`);
+    }
 
-        const fetch = imap.fetch(uid, { bodies: '' });
-        let rawEmail = '';
+    const parsed = await simpleParser(message.source);
 
-        fetch.on('message', (msg) => {
-          msg.on('body', (stream) => {
-            stream.on('data', (chunk) => rawEmail += chunk.toString('utf8'));
-          });
-        });
-
-        fetch.once('error', reject);
-        fetch.once('end', async () => {
-          try {
-            const parsed = await simpleParser(rawEmail);
-            resolve({
-              uid,
-              from: parsed.from?.text || '',
-              to: parsed.to?.text || '',
-              cc: parsed.cc?.text || '',
-              subject: parsed.subject || '(No subject)',
-              date: parsed.date,
-              text: parsed.text || '',
-              html: parsed.html || '',
-              attachments: (parsed.attachments || []).map(a => ({
-                filename: a.filename,
-                contentType: a.contentType,
-                size: a.size
-              }))
-            });
-          } catch (parseErr) {
-            reject(parseErr);
-          }
-        });
-      });
-    });
+    return {
+      uid,
+      from: parsed.from?.text || '',
+      to: parsed.to?.text || '',
+      cc: parsed.cc?.text || '',
+      subject: parsed.subject || '(No subject)',
+      date: parsed.date,
+      text: parsed.text || '',
+      html: parsed.html || '',
+      attachments: (parsed.attachments || []).map((a) => ({
+        filename: a.filename,
+        contentType: a.contentType,
+        size: a.size
+      }))
+    };
   });
 }
 
@@ -183,96 +189,27 @@ async function readEmail(uid, folder = 'inbox') {
  * Search emails
  */
 async function searchEmails(criteria, folder = 'inbox', count = 25) {
-  return withImap(async (imap) => {
-    return new Promise((resolve, reject) => {
-      const folderName = getFolderName(folder);
+  return withMailbox(folder, true, async (client) => {
+    const query = buildSearchQuery(criteria);
+    const uids = await client.search(query, { uid: true });
 
-      imap.openBox(folderName, true, (err, box) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+    if (!uids?.length) {
+      return [];
+    }
 
-        // Build IMAP search criteria
-        const searchCriteria = [];
+    const recentUids = uids.slice(-count);
+    const emails = [];
 
-        if (criteria.from) {
-          searchCriteria.push(['FROM', criteria.from]);
-        }
-        if (criteria.subject) {
-          searchCriteria.push(['SUBJECT', criteria.subject]);
-        }
-        if (criteria.since) {
-          searchCriteria.push(['SINCE', criteria.since]);
-        }
-        if (criteria.before) {
-          searchCriteria.push(['BEFORE', criteria.before]);
-        }
-        if (criteria.unseen) {
-          searchCriteria.push('UNSEEN');
-        }
-        if (criteria.text) {
-          searchCriteria.push(['TEXT', criteria.text]);
-        }
+    for await (const message of client.fetch(recentUids, {
+      envelope: true,
+      flags: true,
+      uid: true
+    }, { uid: true })) {
+      emails.push(mapListMessage(message));
+    }
 
-        // Default to ALL if no criteria
-        if (searchCriteria.length === 0) {
-          searchCriteria.push('ALL');
-        }
-
-        imap.search(searchCriteria, (err, uids) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-
-          if (!uids || uids.length === 0) {
-            resolve([]);
-            return;
-          }
-
-          // Get most recent results
-          const recentUids = uids.slice(-count);
-
-          const emails = [];
-          const fetch = imap.fetch(recentUids, {
-            bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)'],
-            struct: true
-          });
-
-          fetch.on('message', (msg, seqno) => {
-            const email = { seqno };
-
-            msg.on('body', (stream) => {
-              let buffer = '';
-              stream.on('data', (chunk) => buffer += chunk.toString('utf8'));
-              stream.on('end', () => {
-                const headers = Imap.parseHeader(buffer);
-                email.from = headers.from?.[0] || '';
-                email.to = headers.to?.[0] || '';
-                email.subject = headers.subject?.[0] || '(No subject)';
-                email.date = headers.date?.[0] || '';
-              });
-            });
-
-            msg.once('attributes', (attrs) => {
-              email.uid = attrs.uid;
-              email.flags = attrs.flags || [];
-            });
-
-            msg.once('end', () => {
-              emails.push(email);
-            });
-          });
-
-          fetch.once('error', reject);
-          fetch.once('end', () => {
-            emails.sort((a, b) => new Date(b.date) - new Date(a.date));
-            resolve(emails);
-          });
-        });
-      });
-    });
+    emails.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return emails;
   });
 }
 
@@ -280,28 +217,13 @@ async function searchEmails(criteria, folder = 'inbox', count = 25) {
  * Mark email as read/unread
  */
 async function markAsRead(uid, folder = 'inbox', isRead = true) {
-  return withImap(async (imap) => {
-    return new Promise((resolve, reject) => {
-      const folderName = getFolderName(folder);
-
-      imap.openBox(folderName, false, (err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        const flags = ['\\Seen'];
-        const method = isRead ? 'addFlags' : 'delFlags';
-
-        imap[method](uid, flags, (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(true);
-          }
-        });
-      });
-    });
+  return withMailbox(folder, false, async (client) => {
+    if (isRead) {
+      await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+    } else {
+      await client.messageFlagsRemove(uid, ['\\Seen'], { uid: true });
+    }
+    return true;
   });
 }
 
@@ -309,36 +231,35 @@ async function markAsRead(uid, folder = 'inbox', isRead = true) {
  * List folders
  */
 async function listFolders() {
-  return withImap(async (imap) => {
-    return new Promise((resolve, reject) => {
-      imap.getBoxes((err, boxes) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+  const client = createClient();
 
-        const folders = [];
+  try {
+    await client.connect();
+  } catch (err) {
+    if (isAuthError(err)) {
+      throw new Error('UNAUTHORIZED');
+    }
+    throw err;
+  }
 
-        function processBoxes(boxObj, prefix = '') {
-          for (const [name, box] of Object.entries(boxObj)) {
-            const fullPath = prefix ? `${prefix}${box.delimiter}${name}` : name;
-            folders.push({
-              name: fullPath,
-              delimiter: box.delimiter,
-              flags: box.attribs || []
-            });
+  try {
+    const folders = [];
+    const mailboxes = await client.list();
 
-            if (box.children) {
-              processBoxes(box.children, fullPath);
-            }
-          }
-        }
-
-        processBoxes(boxes);
-        resolve(folders);
+    for (const mailbox of mailboxes) {
+      folders.push({
+        name: mailbox.path,
+        delimiter: mailbox.delimiter,
+        flags: mailbox.flags ? Array.from(mailbox.flags) : []
       });
-    });
-  });
+    }
+
+    return folders;
+  } finally {
+    if (client.usable) {
+      await client.logout();
+    }
+  }
 }
 
 module.exports = {
