@@ -300,5 +300,6 @@ module.exports = {
   searchFiles,
   formatBytes,
   getRoot,
+  resolveSafePath,
   MAX_READ_BYTES
 };

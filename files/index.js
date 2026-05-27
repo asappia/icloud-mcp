@@ -3,7 +3,16 @@
  */
 
 const localClient = require('./local-client');
+const icloudTools = require('./icloud-tools-client');
 const { handleError } = require('../utils/error-handler');
+
+async function requireIcloudTools() {
+  const hint = await icloudTools.getInstallHint();
+  if (!hint.available) {
+    throw new Error(`ICLOUD_TOOLS_NOT_INSTALLED: ${hint.install}`);
+  }
+  return hint;
+}
 
 const filesTools = [
   {
@@ -13,9 +22,92 @@ const filesTools = [
     handler: async () => {
       try {
         const info = await localClient.getDriveInfo();
-        return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] };
+        const tools = await icloudTools.getInstallHint();
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ ...info, icloudTools: tools }, null, 2)
+          }]
+        };
       } catch (error) {
         return handleError(error, 'icloud-drive-info');
+      }
+    }
+  },
+  {
+    name: 'icloud-sync-status',
+    description: 'List iCloud Drive files by sync state (local vs cloud-only) via icloud-tools CLI. Requires: brew install icloud-tools',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path relative to iCloud Drive root' },
+        recursive: { type: 'boolean', description: 'Scan subfolders (default: true)' },
+        filter: {
+          type: 'string',
+          enum: ['all', 'cloud', 'local'],
+          description: 'Show all, cloud-only, or local files (default: all)'
+        },
+        sort: { type: 'string', enum: ['size', 'name'], description: 'Sort order (optional)' }
+      },
+      required: []
+    },
+    handler: async ({ path: relPath = '', recursive = true, filter = 'all', sort }) => {
+      try {
+        await requireIcloudTools();
+        const result = await icloudTools.getSyncStatus(relPath, { recursive, filter, sort });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-sync-status');
+      }
+    }
+  },
+  {
+    name: 'icloud-download',
+    description: 'Download cloud-only iCloud files to this Mac (background, no Finder). Requires icloud-tools.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File or folder relative to iCloud Drive root' },
+        recursive: { type: 'boolean', description: 'Download folder recursively (default: true)' },
+        dryRun: { type: 'boolean', description: 'Preview only, do not download (default: false)' },
+        maxConcurrent: { type: 'number', description: 'Parallel downloads (default: 3)' }
+      },
+      required: ['path']
+    },
+    handler: async ({
+      path: relPath,
+      recursive = true,
+      dryRun = false,
+      maxConcurrent = 3
+    }) => {
+      try {
+        await requireIcloudTools();
+        const result = await icloudTools.download(relPath, { recursive, dryRun, maxConcurrent });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-download');
+      }
+    }
+  },
+  {
+    name: 'icloud-evict',
+    description: 'Remove local copies of iCloud files (free disk space, keep in cloud). Requires icloud-tools.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File or folder relative to iCloud Drive root' },
+        recursive: { type: 'boolean', description: 'Recursive (default: true)' },
+        dryRun: { type: 'boolean', description: 'Preview only (default: false)' }
+      },
+      required: ['path']
+    },
+    handler: async ({ path: relPath, recursive = true, dryRun = false }) => {
+      try {
+        await requireIcloudTools();
+        const result = await icloudTools.evict(relPath, { recursive, dryRun });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return handleError(error, 'icloud-evict');
       }
     }
   },
@@ -129,12 +221,19 @@ const filesTools = [
         path: {
           type: 'string',
           description: 'File path relative to iCloud Drive root'
+        },
+        downloadIfCloud: {
+          type: 'boolean',
+          description: 'Download from iCloud first if cloud-only (default: true, uses icloud-tools)'
         }
       },
       required: ['path']
     },
-    handler: async ({ path: relPath }) => {
+    handler: async ({ path: relPath, downloadIfCloud = true }) => {
       try {
+        if (downloadIfCloud && await icloudTools.isAvailable()) {
+          await icloudTools.ensureDownloaded(relPath);
+        }
         const file = await localClient.readFileText(relPath);
         return { content: [{ type: 'text', text: JSON.stringify(file, null, 2) }] };
       } catch (error) {
